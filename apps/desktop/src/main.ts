@@ -76,6 +76,7 @@ import {
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch.ts";
 import { resolveDesktopAppBranding } from "./appBranding.ts";
 import { bindFirstRevealTrigger, type RevealSubscription } from "./windowReveal.ts";
+import { previewViewManager } from "./preview-view-manager.ts";
 
 syncShellEnvironment();
 
@@ -102,6 +103,22 @@ const SET_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:set-saved-environment-secr
 const REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:remove-saved-environment-secret";
 const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
 const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
+const PREVIEW_CREATE_TAB_CHANNEL = "desktop:preview-create-tab";
+const PREVIEW_CLOSE_TAB_CHANNEL = "desktop:preview-close-tab";
+const PREVIEW_REGISTER_WEBVIEW_CHANNEL = "desktop:preview-register-webview";
+const PREVIEW_NAVIGATE_CHANNEL = "desktop:preview-navigate";
+const PREVIEW_GO_BACK_CHANNEL = "desktop:preview-go-back";
+const PREVIEW_GO_FORWARD_CHANNEL = "desktop:preview-go-forward";
+const PREVIEW_REFRESH_CHANNEL = "desktop:preview-refresh";
+const PREVIEW_ZOOM_IN_CHANNEL = "desktop:preview-zoom-in";
+const PREVIEW_ZOOM_OUT_CHANNEL = "desktop:preview-zoom-out";
+const PREVIEW_RESET_ZOOM_CHANNEL = "desktop:preview-reset-zoom";
+const PREVIEW_HARD_RELOAD_CHANNEL = "desktop:preview-hard-reload";
+const PREVIEW_OPEN_DEVTOOLS_CHANNEL = "desktop:preview-open-devtools";
+const PREVIEW_CLEAR_COOKIES_CHANNEL = "desktop:preview-clear-cookies";
+const PREVIEW_CLEAR_CACHE_CHANNEL = "desktop:preview-clear-cache";
+const PREVIEW_GET_BROWSER_PARTITION_CHANNEL = "desktop:preview-get-browser-partition";
+const PREVIEW_STATE_CHANGE_CHANNEL = "desktop:preview-state-change";
 const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_SETTINGS_PATH = Path.join(STATE_DIR, "desktop-settings.json");
@@ -1865,6 +1882,113 @@ function registerIpcHandlers(): void {
       state: updateState,
     } satisfies DesktopUpdateCheckResult;
   });
+
+  registerPreviewIpcHandlers();
+}
+
+function registerPreviewIpcHandlers(): void {
+  const stringTabId = (raw: unknown): string => {
+    if (typeof raw !== "string" || raw.trim().length === 0) {
+      throw new Error("preview tab id must be a non-empty string");
+    }
+    return raw;
+  };
+
+  ipcMain.removeHandler(PREVIEW_CREATE_TAB_CHANNEL);
+  ipcMain.handle(PREVIEW_CREATE_TAB_CHANNEL, async (_event, rawTabId: unknown) => {
+    previewViewManager.createTab(stringTabId(rawTabId));
+  });
+
+  ipcMain.removeHandler(PREVIEW_CLOSE_TAB_CHANNEL);
+  ipcMain.handle(PREVIEW_CLOSE_TAB_CHANNEL, async (_event, rawTabId: unknown) => {
+    previewViewManager.closeTab(stringTabId(rawTabId));
+  });
+
+  ipcMain.removeHandler(PREVIEW_REGISTER_WEBVIEW_CHANNEL);
+  ipcMain.handle(
+    PREVIEW_REGISTER_WEBVIEW_CHANNEL,
+    async (_event, rawTabId: unknown, rawId: unknown) => {
+      const webContentsId = typeof rawId === "number" ? Math.floor(rawId) : Number.NaN;
+      if (!Number.isFinite(webContentsId) || webContentsId <= 0) {
+        throw new Error("preview webContentsId must be a positive integer");
+      }
+      previewViewManager.registerWebview(stringTabId(rawTabId), webContentsId);
+    },
+  );
+
+  ipcMain.removeHandler(PREVIEW_NAVIGATE_CHANNEL);
+  ipcMain.handle(PREVIEW_NAVIGATE_CHANNEL, async (_event, rawTabId: unknown, rawUrl: unknown) => {
+    if (typeof rawUrl !== "string") {
+      throw new Error("preview url must be a string");
+    }
+    await previewViewManager.navigate(stringTabId(rawTabId), rawUrl);
+  });
+
+  ipcMain.removeHandler(PREVIEW_GO_BACK_CHANNEL);
+  ipcMain.handle(PREVIEW_GO_BACK_CHANNEL, async (_event, rawTabId: unknown) => {
+    previewViewManager.goBack(stringTabId(rawTabId));
+  });
+
+  ipcMain.removeHandler(PREVIEW_GO_FORWARD_CHANNEL);
+  ipcMain.handle(PREVIEW_GO_FORWARD_CHANNEL, async (_event, rawTabId: unknown) => {
+    previewViewManager.goForward(stringTabId(rawTabId));
+  });
+
+  ipcMain.removeHandler(PREVIEW_REFRESH_CHANNEL);
+  ipcMain.handle(PREVIEW_REFRESH_CHANNEL, async (_event, rawTabId: unknown) => {
+    previewViewManager.refresh(stringTabId(rawTabId));
+  });
+
+  ipcMain.removeHandler(PREVIEW_ZOOM_IN_CHANNEL);
+  ipcMain.handle(PREVIEW_ZOOM_IN_CHANNEL, async (_event, rawTabId: unknown) => {
+    previewViewManager.zoomIn(stringTabId(rawTabId));
+  });
+
+  ipcMain.removeHandler(PREVIEW_ZOOM_OUT_CHANNEL);
+  ipcMain.handle(PREVIEW_ZOOM_OUT_CHANNEL, async (_event, rawTabId: unknown) => {
+    previewViewManager.zoomOut(stringTabId(rawTabId));
+  });
+
+  ipcMain.removeHandler(PREVIEW_RESET_ZOOM_CHANNEL);
+  ipcMain.handle(PREVIEW_RESET_ZOOM_CHANNEL, async (_event, rawTabId: unknown) => {
+    previewViewManager.resetZoom(stringTabId(rawTabId));
+  });
+
+  ipcMain.removeHandler(PREVIEW_HARD_RELOAD_CHANNEL);
+  ipcMain.handle(PREVIEW_HARD_RELOAD_CHANNEL, async (_event, rawTabId: unknown) => {
+    previewViewManager.hardReload(stringTabId(rawTabId));
+  });
+
+  ipcMain.removeHandler(PREVIEW_OPEN_DEVTOOLS_CHANNEL);
+  ipcMain.handle(PREVIEW_OPEN_DEVTOOLS_CHANNEL, async (_event, rawTabId: unknown) => {
+    previewViewManager.openDevTools(stringTabId(rawTabId));
+  });
+
+  ipcMain.removeHandler(PREVIEW_CLEAR_COOKIES_CHANNEL);
+  ipcMain.handle(PREVIEW_CLEAR_COOKIES_CHANNEL, async () => {
+    await previewViewManager.clearCookies();
+  });
+
+  ipcMain.removeHandler(PREVIEW_CLEAR_CACHE_CHANNEL);
+  ipcMain.handle(PREVIEW_CLEAR_CACHE_CHANNEL, async () => {
+    await previewViewManager.clearCache();
+  });
+
+  ipcMain.removeHandler(PREVIEW_GET_BROWSER_PARTITION_CHANNEL);
+  ipcMain.handle(PREVIEW_GET_BROWSER_PARTITION_CHANNEL, async () =>
+    previewViewManager.getBrowserPartition(),
+  );
+
+  // Eagerly create the partitioned session so cookies persist from the very
+  // first tab load (otherwise the session is lazily built on first navigate).
+  previewViewManager.getBrowserSession();
+
+  previewViewManager.onStateChange((tabId, state) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (window.isDestroyed()) continue;
+      window.webContents.send(PREVIEW_STATE_CHANGE_CHANNEL, tabId, state);
+    }
+  });
 }
 
 function getIconOption(): { icon: string } | Record<string, never> {
@@ -1935,8 +2059,12 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // Required for the in-app preview browser (<webview> custom element).
+      webviewTag: true,
     },
   });
+
+  previewViewManager.setMainWindow(window);
 
   window.webContents.on("context-menu", (event, params) => {
     event.preventDefault();

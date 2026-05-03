@@ -16,6 +16,7 @@ import {
   type OrchestrationCommand,
   type OrchestrationEvent,
   ORCHESTRATION_WS_METHODS,
+  type PreviewEvent,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -37,6 +38,7 @@ import {
   ManagedRuntime,
   Option,
   Path,
+  PubSub,
   Stream,
 } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -83,6 +85,8 @@ import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./server
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
 import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
+import { PreviewManager } from "./preview/Services/Manager.ts";
+import { PreviewPortScanner } from "./preview/Services/PortScanner.ts";
 import {
   BrowserTraceCollector,
   type BrowserTraceCollectorShape,
@@ -555,6 +559,27 @@ const buildAppUnderTest = (options?: {
       Layer.provide(
         Layer.mock(TerminalManager)({
           ...options?.layers?.terminalManager,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(PreviewManager)({
+          open: () => Effect.die("PreviewManager not stubbed in this test"),
+          navigate: () => Effect.die("PreviewManager not stubbed in this test"),
+          reportStatus: () => Effect.void,
+          refresh: () => Effect.void,
+          close: () => Effect.void,
+          list: () => Effect.succeed({ sessions: [] }),
+          events: Stream.empty,
+          subscribeEvents: Effect.flatMap(PubSub.unbounded<PreviewEvent>(), (pubsub) =>
+            PubSub.subscribe(pubsub),
+          ),
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(PreviewPortScanner)({
+          scan: () => Effect.succeed([]),
+          subscribe: () => Effect.succeed(() => {}),
+          retain: () => Effect.succeed(() => {}),
         }),
       ),
       Layer.provide(
