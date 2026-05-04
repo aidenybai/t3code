@@ -56,6 +56,8 @@ import {
   insertInlineTerminalContextPlaceholder,
   removeInlineTerminalContextPlaceholder,
 } from "../../lib/terminalContext";
+import { type ElementContextDraft } from "../../lib/elementContext";
+import { ComposerPendingElementContexts } from "./ComposerPendingElementContexts";
 import {
   shouldUseCompactComposerPrimaryActions,
   shouldUseCompactComposerFooter,
@@ -347,6 +349,7 @@ export interface ChatComposerHandle {
     prompt: string;
     images: ComposerImageAttachment[];
     terminalContexts: TerminalContextDraft[];
+    elementContexts: ElementContextDraft[];
     selectedPromptEffort: string | null;
     selectedModelOptionsForDispatch: unknown;
     selectedModelSelection: ModelSelection;
@@ -429,6 +432,7 @@ export interface ChatComposerProps {
   promptRef: React.MutableRefObject<string>;
   composerImagesRef: React.MutableRefObject<ComposerImageAttachment[]>;
   composerTerminalContextsRef: React.MutableRefObject<TerminalContextDraft[]>;
+  composerElementContextsRef: React.MutableRefObject<ElementContextDraft[]>;
 
   // Scroll
   shouldAutoScrollRef: React.MutableRefObject<boolean>;
@@ -516,6 +520,7 @@ export const ChatComposer = memo(
       promptRef,
       composerImagesRef,
       composerTerminalContextsRef,
+      composerElementContextsRef,
       shouldAutoScrollRef,
       scheduleStickToBottom,
       onSend,
@@ -544,6 +549,7 @@ export const ChatComposer = memo(
     const prompt = composerDraft.prompt;
     const composerImages = composerDraft.images;
     const composerTerminalContexts = composerDraft.terminalContexts;
+    const composerElementContexts = composerDraft.elementContexts;
     const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
 
     const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
@@ -558,6 +564,9 @@ export const ChatComposer = memo(
     );
     const setComposerDraftTerminalContexts = useComposerDraftStore(
       (store) => store.setTerminalContexts,
+    );
+    const removeComposerDraftElementContext = useComposerDraftStore(
+      (store) => store.removeElementContext,
     );
     const clearComposerDraftPersistedAttachments = useComposerDraftStore(
       (store) => store.clearPersistedAttachments,
@@ -796,8 +805,9 @@ export const ChatComposer = memo(
           prompt,
           imageCount: composerImages.length,
           terminalContexts: composerTerminalContexts,
+          elementContextCount: composerElementContexts.length,
         }),
-      [composerImages.length, composerTerminalContexts, prompt],
+      [composerImages.length, composerTerminalContexts, composerElementContexts.length, prompt],
     );
 
     // ------------------------------------------------------------------
@@ -1091,6 +1101,10 @@ export const ChatComposer = memo(
     useEffect(() => {
       composerTerminalContextsRef.current = composerTerminalContexts;
     }, [composerTerminalContexts, composerTerminalContextsRef]);
+
+    useEffect(() => {
+      composerElementContextsRef.current = composerElementContexts;
+    }, [composerElementContexts, composerElementContextsRef]);
 
     // ------------------------------------------------------------------
     // Composer menu highlight sync
@@ -1770,6 +1784,7 @@ export const ChatComposer = memo(
           prompt: promptRef.current,
           images: composerImagesRef.current,
           terminalContexts: composerTerminalContextsRef.current,
+          elementContexts: composerElementContextsRef.current,
           selectedPromptEffort,
           selectedModelOptionsForDispatch,
           selectedModelSelection,
@@ -1787,6 +1802,7 @@ export const ChatComposer = memo(
         promptRef,
         composerImagesRef,
         composerTerminalContextsRef,
+        composerElementContextsRef,
         isComposerModelPickerOpen,
         readComposerSnapshot,
         selectedModel,
@@ -1875,6 +1891,18 @@ export const ChatComposer = memo(
                   />
                 </div>
               )}
+
+              {!isComposerApprovalState &&
+                pendingUserInputs.length === 0 &&
+                composerElementContexts.length > 0 && (
+                  <ComposerPendingElementContexts
+                    contexts={composerElementContexts}
+                    onRemove={(contextId) =>
+                      removeComposerDraftElementContext(composerDraftTarget, contextId)
+                    }
+                    className="mb-3"
+                  />
+                )}
 
               {!isComposerApprovalState &&
                 pendingUserInputs.length === 0 &&

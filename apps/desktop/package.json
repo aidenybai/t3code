@@ -17,7 +17,8 @@
   "dependencies": {
     "effect": "catalog:",
     "electron": "40.9.3",
-    "electron-updater": "^6.6.2"
+    "electron-updater": "^6.6.2",
+    "react-grab": "^0.1.32"
   },
   "devDependencies": {
     "@t3tools/contracts": "workspace:*",

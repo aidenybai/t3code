@@ -3,6 +3,7 @@ import * as Crypto from "node:crypto";
 import * as FS from "node:fs";
 import * as OS from "node:os";
 import * as Path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import {
   app,
@@ -23,6 +24,7 @@ import type {
   ClientSettings,
   DesktopTheme,
   DesktopAppBranding,
+  DesktopPreviewWebviewConfig,
   DesktopServerExposureMode,
   DesktopServerExposureState,
   DesktopUpdateChannel,
@@ -117,7 +119,9 @@ const PREVIEW_HARD_RELOAD_CHANNEL = "desktop:preview-hard-reload";
 const PREVIEW_OPEN_DEVTOOLS_CHANNEL = "desktop:preview-open-devtools";
 const PREVIEW_CLEAR_COOKIES_CHANNEL = "desktop:preview-clear-cookies";
 const PREVIEW_CLEAR_CACHE_CHANNEL = "desktop:preview-clear-cache";
-const PREVIEW_GET_BROWSER_PARTITION_CHANNEL = "desktop:preview-get-browser-partition";
+const PREVIEW_GET_PREVIEW_CONFIG_CHANNEL = "desktop:preview-get-preview-config";
+const PREVIEW_PICK_ELEMENT_CHANNEL = "desktop:preview-pick-element";
+const PREVIEW_CANCEL_PICK_ELEMENT_CHANNEL = "desktop:preview-cancel-pick-element";
 const PREVIEW_STATE_CHANGE_CHANNEL = "desktop:preview-state-change";
 const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
@@ -1886,6 +1890,34 @@ function registerIpcHandlers(): void {
   registerPreviewIpcHandlers();
 }
 
+/**
+ * Returns the picker preload bundle in the two forms Electron requires:
+ *
+ * - `path`: absolute filesystem path. This is what `webPreferences.preload`
+ *   (set in main, e.g. via `will-attach-webview`) accepts. Electron rejects
+ *   `file://` URLs there with `"preload script must have absolute path"` —
+ *   silently breaking the whole picker.
+ * - `url`: `file://`-style URL produced via `pathToFileURL`. This is what
+ *   the renderer hands to `<webview preload="...">`. The HTML attribute
+ *   path requires a URL, NOT a bare path. `pathToFileURL` is mandatory so
+ *   the encoding works on Windows (drive letters are otherwise parsed as
+ *   the URL host) and on paths containing spaces / unicode.
+ *
+ * Returns `null` if the preload bundle isn't present (older builds, broken
+ * install). Both forms are null-or-present in lockstep.
+ */
+function resolvePickPreload(): { path: string; url: string } | null {
+  const path = Path.join(__dirname, "preview-pick-preload.cjs");
+  if (!FS.existsSync(path)) return null;
+  return { path, url: pathToFileURL(path).toString() };
+}
+
+function resolvePickPreloadPath(): string | null {
+  // Backwards-compatible wrapper used by the renderer-facing IPC handler.
+  // Returns the URL form (suitable for `<webview preload="...">`).
+  return resolvePickPreload()?.url ?? null;
+}
+
 function registerPreviewIpcHandlers(): void {
   const stringTabId = (raw: unknown): string => {
     if (typeof raw !== "string" || raw.trim().length === 0) {
@@ -1974,10 +2006,25 @@ function registerPreviewIpcHandlers(): void {
     await previewViewManager.clearCache();
   });
 
-  ipcMain.removeHandler(PREVIEW_GET_BROWSER_PARTITION_CHANNEL);
-  ipcMain.handle(PREVIEW_GET_BROWSER_PARTITION_CHANNEL, async () =>
-    previewViewManager.getBrowserPartition(),
+  ipcMain.removeHandler(PREVIEW_GET_PREVIEW_CONFIG_CHANNEL);
+  ipcMain.handle(
+    PREVIEW_GET_PREVIEW_CONFIG_CHANNEL,
+    async (): Promise<DesktopPreviewWebviewConfig> => ({
+      partition: previewViewManager.getBrowserPartition(),
+      webPreferences: previewViewManager.getWebviewPreferences(),
+      preloadUrl: resolvePickPreloadPath(),
+    }),
   );
+
+  ipcMain.removeHandler(PREVIEW_PICK_ELEMENT_CHANNEL);
+  ipcMain.handle(PREVIEW_PICK_ELEMENT_CHANNEL, async (_event, rawTabId: unknown) => {
+    return previewViewManager.pickElement(stringTabId(rawTabId));
+  });
+
+  ipcMain.removeHandler(PREVIEW_CANCEL_PICK_ELEMENT_CHANNEL);
+  ipcMain.handle(PREVIEW_CANCEL_PICK_ELEMENT_CHANNEL, async (_event, rawTabId: unknown) => {
+    previewViewManager.cancelPickElement(stringTabId(rawTabId));
+  });
 
   // Eagerly create the partitioned session so cookies persist from the very
   // first tab load (otherwise the session is lazily built on first navigate).
@@ -2065,6 +2112,60 @@ function createWindow(): BrowserWindow {
   });
 
   previewViewManager.setMainWindow(window);
+
+  // Defense-in-depth for the preview <webview>. The renderer-side attribute
+  // string (`webpreferences="..."`) is the primary control, but a renderer
+  // bug or future regression could re-introduce dangerous flags. This handler
+  // is the last gate before Electron actually attaches the guest.
+  //
+  // GATING: This handler must ONLY touch preview-tab webviews — identified by
+  // their persistent partition. If we ran unconditionally, any future guest
+  // webview the host renderer mounts (docs panel, OAuth popup, image
+  // expansion, etc.) would also get our picker preload force-injected and
+  // its security flags clobbered, even when those guests have unrelated
+  // requirements. We intentionally use the partition string (which the
+  // renderer sets at element-create time and Electron forwards to us here)
+  // as the discriminator since it's the canonical "this is a preview tab"
+  // signal we already pass through `getBrowserPartition`.
+  //
+  // For preview tabs we then:
+  // 1. Force `sandbox: true` and `nodeIntegration*: false`. With these on,
+  //    even when `contextIsolation` is disabled (we WANT it off so the
+  //    picker preload can read the page's React DevTools hook), the page
+  //    cannot reach Node APIs.
+  // 2. Pin the preload path to whatever main currently resolves. Comparing
+  //    the renderer-supplied URL against the resolved path is fragile —
+  //    Electron normalizes the value passed here (sometimes drops the
+  //    `file://` scheme, sometimes adjusts percent-encoding), and a string
+  //    mismatch would cause us to strip our own legitimate preload, which
+  //    silently broke the picker after the security pass landed. Hardcoding
+  //    the value sidesteps that and is strictly stronger as a security
+  //    posture (no other preload can be substituted, period).
+  //
+  //    CRITICAL: `webPreferences.preload` here requires an absolute
+  //    filesystem PATH, not a `file://` URL. Setting a URL produces the
+  //    error "preload script must have absolute path" and Electron silently
+  //    skips loading the preload entirely (no picker overlay, no IPC). The
+  //    renderer-side `<webview preload="...">` attribute is the opposite —
+  //    it requires a URL. Two different consumers, two different formats.
+  window.webContents.on("will-attach-webview", (_event, webPreferences, params) => {
+    if (params["partition"] !== previewViewManager.getBrowserPartition()) {
+      // Non-preview guest webview — leave its config alone. (This branch is
+      // dead today since we only mount the preview webview, but exists so
+      // the validator stays correct as the codebase grows.)
+      return;
+    }
+    webPreferences.sandbox = true;
+    webPreferences.nodeIntegration = false;
+    webPreferences.nodeIntegrationInWorker = false;
+    webPreferences.nodeIntegrationInSubFrames = false;
+    const allowedPreload = resolvePickPreload();
+    if (allowedPreload) {
+      (webPreferences as { preload?: string }).preload = allowedPreload.path;
+    } else {
+      delete (webPreferences as { preload?: string }).preload;
+    }
+  });
 
   window.webContents.on("context-menu", (event, params) => {
     event.preventDefault();

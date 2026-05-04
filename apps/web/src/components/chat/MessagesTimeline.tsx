@@ -50,6 +50,7 @@ import {
   deriveDisplayedUserMessageState,
   type ParsedTerminalContextEntry,
 } from "~/lib/terminalContext";
+import { type ParsedElementContextEntry } from "~/lib/elementContext";
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
@@ -303,6 +304,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
           const userImages = row.message.attachments ?? [];
           const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
           const terminalContexts = displayedUserMessage.contexts;
+          const elementContexts = displayedUserMessage.elementContexts;
           const canRevertAgentWork = typeof row.revertTurnCount === "number";
           return (
             <div className="flex justify-end">
@@ -343,10 +345,12 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   </div>
                 )}
                 {(displayedUserMessage.visibleText.trim().length > 0 ||
-                  terminalContexts.length > 0) && (
+                  terminalContexts.length > 0 ||
+                  elementContexts.length > 0) && (
                   <UserMessageBody
                     text={displayedUserMessage.visibleText}
                     terminalContexts={terminalContexts}
+                    elementContexts={elementContexts}
                   />
                 )}
                 <div className="mt-1.5 flex items-center justify-end gap-2">
@@ -684,7 +688,13 @@ const UserMessageTerminalContextInlineLabel = memo(
 const UserMessageBody = memo(function UserMessageBody(props: {
   text: string;
   terminalContexts: ParsedTerminalContextEntry[];
+  elementContexts: ParsedElementContextEntry[];
 }) {
+  const elementChips =
+    props.elementContexts.length > 0 ? (
+      <UserMessageElementContextChips contexts={props.elementContexts} />
+    ) : null;
+
   if (props.terminalContexts.length > 0) {
     const hasEmbeddedInlineLabels = textContainsInlineTerminalContextLabels(
       props.text,
@@ -729,9 +739,12 @@ const UserMessageBody = memo(function UserMessageBody(props: {
         }
 
         return (
-          <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
-            {inlineNodes}
-          </div>
+          <>
+            <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
+              {inlineNodes}
+            </div>
+            {elementChips}
+          </>
         );
       }
     }
@@ -752,24 +765,56 @@ const UserMessageBody = memo(function UserMessageBody(props: {
 
     if (props.text.length > 0) {
       inlineNodes.push(<span key="user-message-terminal-context-inline-text">{props.text}</span>);
-    } else if (inlinePrefix.length === 0) {
+    } else if (inlinePrefix.length === 0 && !elementChips) {
       return null;
     }
 
     return (
-      <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
-        {inlineNodes}
-      </div>
+      <>
+        <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
+          {inlineNodes}
+        </div>
+        {elementChips}
+      </>
     );
   }
 
   if (props.text.length === 0) {
-    return null;
+    return elementChips;
   }
 
   return (
-    <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
-      {props.text}
+    <>
+      <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
+        {props.text}
+      </div>
+      {elementChips}
+    </>
+  );
+});
+
+const UserMessageElementContextChips = memo(function UserMessageElementContextChips(props: {
+  contexts: ParsedElementContextEntry[];
+}) {
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1.5">
+      {props.contexts.map((context) => (
+        // header+body length is sufficient to disambiguate parsed entries
+        // (the same element re-picked is deduped upstream by the store, so
+        // we never see two adjacent entries with identical bodies here).
+        <Tooltip key={`user-element-context:${context.header}:${context.body.length}`}>
+          <TooltipTrigger
+            render={
+              <span className="inline-flex items-center rounded-md border border-border bg-background/60 px-1.5 py-0.5 text-[11px] font-medium text-foreground">
+                {context.header}
+              </span>
+            }
+          />
+          <TooltipPopup side="top" className="max-w-96 whitespace-pre-wrap leading-tight">
+            {context.body.length > 0 ? `${context.header}\n${context.body}` : context.header}
+          </TooltipPopup>
+        </Tooltip>
+      ))}
     </div>
   );
 });

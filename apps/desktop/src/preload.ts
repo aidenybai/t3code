@@ -38,7 +38,9 @@ const PREVIEW_HARD_RELOAD_CHANNEL = "desktop:preview-hard-reload";
 const PREVIEW_OPEN_DEVTOOLS_CHANNEL = "desktop:preview-open-devtools";
 const PREVIEW_CLEAR_COOKIES_CHANNEL = "desktop:preview-clear-cookies";
 const PREVIEW_CLEAR_CACHE_CHANNEL = "desktop:preview-clear-cache";
-const PREVIEW_GET_BROWSER_PARTITION_CHANNEL = "desktop:preview-get-browser-partition";
+const PREVIEW_GET_PREVIEW_CONFIG_CHANNEL = "desktop:preview-get-preview-config";
+const PREVIEW_PICK_ELEMENT_CHANNEL = "desktop:preview-pick-element";
+const PREVIEW_CANCEL_PICK_ELEMENT_CHANNEL = "desktop:preview-cancel-pick-element";
 const PREVIEW_STATE_CHANGE_CHANNEL = "desktop:preview-state-change";
 
 contextBridge.exposeInMainWorld("desktopBridge", {
@@ -117,7 +119,9 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     openDevTools: (tabId) => ipcRenderer.invoke(PREVIEW_OPEN_DEVTOOLS_CHANNEL, tabId),
     clearCookies: () => ipcRenderer.invoke(PREVIEW_CLEAR_COOKIES_CHANNEL),
     clearCache: () => ipcRenderer.invoke(PREVIEW_CLEAR_CACHE_CHANNEL),
-    getBrowserPartition: () => ipcRenderer.invoke(PREVIEW_GET_BROWSER_PARTITION_CHANNEL),
+    getPreviewConfig: () => ipcRenderer.invoke(PREVIEW_GET_PREVIEW_CONFIG_CHANNEL),
+    pickElement: (tabId) => ipcRenderer.invoke(PREVIEW_PICK_ELEMENT_CHANNEL, tabId),
+    cancelPickElement: (tabId) => ipcRenderer.invoke(PREVIEW_CANCEL_PICK_ELEMENT_CHANNEL, tabId),
     onStateChange: (listener) => {
       const wrappedListener = (
         _event: Electron.IpcRendererEvent,
